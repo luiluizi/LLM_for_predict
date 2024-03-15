@@ -85,8 +85,6 @@ the provided time and regional information, and then generate the predictive tok
         for i in prompts:
             final_prompt += BEGIN_SIGNAL + i + END_SIGNAL
         final_prompt += BEGIN_SIGNAL
-        # print(final_prompt)
-        # assert(False)
             
     def process(self, data_x):
         final_data = []
