@@ -54,14 +54,14 @@ class MyModelGridDataset(TrafficStateGridDataset):
     def gen_in_out_flow_prompt(self, flows, time_strs):
         time_interval = self.time_intervals//60
         human_str = f"human: Given the historical data for {self.traffic_type} flow over {self.input_window} time steps in a specific region of {self.loc} City, \
-            the recorded {self.traffic_type} inflows are {str(flows[0])}, and the recorded {self.traffic_type} outflows are {str(flows[1])}. \
-            The recording time of the historical data is '{time_strs[0]} to {time_strs[1]}, \
-            with data points recorded at {time_interval}-minute intervals'. Now we want to predict the {self.traffic_type} inflow and outflow for \
-            the next {self.output_window} time steps during the time period of '{time_strs[2]} to {time_strs[3]}, \
-            with data points recorded at {time_interval}-minute intervals'. To improve prediction accuracy, a spatio-temporal model is utilized \
-            to encode the historical {self.traffic_type} data as tokens <ST_start><ST_patch><ST_patch><ST_end>, where the first and the second tokens correspond to the representations \
-            of {self.traffic_type} inflow and outflow. Please conduct an analysis of the traffic patterns in this region, taking into account \
-            the provided time and regional information, and then generate the predictive tokens for regression, in the form \"<ST_start><ST_patch><ST_patch><ST_end>\"."
+the recorded {self.traffic_type} inflows are {str(flows[0])}, and the recorded {self.traffic_type} outflows are {str(flows[1])}. \
+The recording time of the historical data is '{time_strs[0]} to {time_strs[1]}, \
+with data points recorded at {time_interval}-minute intervals'. Now we want to predict the {self.traffic_type} inflow and outflow for \
+the next {self.output_window} time steps during the time period of '{time_strs[2]} to {time_strs[3]}, \
+with data points recorded at {time_interval}-minute intervals'. To improve prediction accuracy, a spatio-temporal model is utilized \
+to encode the historical {self.traffic_type} data as tokens <ST_start><ST_patch><ST_patch><ST_end>, where the first and the second tokens correspond to the representations \
+of {self.traffic_type} inflow and outflow. Please conduct an analysis of the traffic patterns in this region, taking into account \
+the provided time and regional information, and then generate the predictive tokens for regression, in the form \"<ST_start><ST_patch><ST_patch><ST_end>\"."
         gpt_str = f"gpt: Based on the given information, the predicted tokens of {self.traffic_type} inflow and outflow in this region are <ST_start><ST_patch><ST_patch><ST_end>."
         return [human_str, gpt_str]
         
@@ -73,8 +73,7 @@ class MyModelGridDataset(TrafficStateGridDataset):
         # F * T
         BEGIN_SIGNAL = '###'
         END_SIGNAL = "\n"
-        header = "A chat between a curious human and an artificial intelligence assistant. \
-                 The assistant gives helpful, detailed, and polite answers to the human's questions."
+        header = "A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human's questions."
         time_strs = self.gen_timeslot_str(timeslot_id)
         if len(flows) == 2:
             prompts = self.gen_in_out_flow_prompt(flows, time_strs)
@@ -86,8 +85,8 @@ class MyModelGridDataset(TrafficStateGridDataset):
         for i in prompts:
             final_prompt += BEGIN_SIGNAL + i + END_SIGNAL
         final_prompt += BEGIN_SIGNAL
-        print(final_prompt)
-        assert(False)
+        # print(final_prompt)
+        # assert(False)
             
     def process(self, data_x):
         final_data = []
@@ -102,6 +101,7 @@ class MyModelGridDataset(TrafficStateGridDataset):
 
     def get_data(self):
         x_train, y_train, x_val, y_val, x_test, y_test = [], [], [], [], [], []
+        self._load_grid_3d(self.data_files[0]) #get time information
         if self.data is None:
             self.data = {}
             if self.cache_dataset and os.path.exists(self.cache_file_name):
@@ -110,7 +110,7 @@ class MyModelGridDataset(TrafficStateGridDataset):
                 x_train, y_train, x_val, y_val, x_test, y_test = self._generate_train_val_test()
         self.feature_dim = x_train.shape[-1]
         self.process(x_train)
-
+        assert(False)
         
         train_data = list(zip(x_train, y_train))
         eval_data = list(zip(x_val, y_val))
