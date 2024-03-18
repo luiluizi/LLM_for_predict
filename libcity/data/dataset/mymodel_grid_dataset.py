@@ -5,7 +5,12 @@ import datetime
 from tqdm import tqdm
 from libcity.data.dataset import TrafficStateGridDataset
 from libcity.data.utils import generate_dataloader
+from transformers import AutoTokenizer
 
+IGNORE_INDEX = -100
+DEFAULT_ST_PATCH_TOKEN = "<ST_patch>"
+DEFAULT_ST_START_TOKEN = "<ST_start>"
+DEFAULT_ST_END_TOKEN = "<ST_end>"
 
 class MyModelGridDataset(TrafficStateGridDataset):
 
@@ -16,14 +21,13 @@ class MyModelGridDataset(TrafficStateGridDataset):
         self.random_regions = 40
         self.cache_file_name = os.path.join('./libcity/cache/dataset_cache/',
                                             'mymodel_grid_based_{}.npz'.format(self.parameters_str))
-        # self.tokenizer
-        self.feature_name = {
-            'input_ids': 'int',
-            'labels': 'int',
-            'X': 'float',
-            'y': 'float',
-            'region_id': 'int'
-        }
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            "/home/panda/private/jjw/hck/br/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T",
+            model_max_length = 2048,
+            padding_side = "right",
+            use_fast = False
+        )
+        self._initialize_tokenizer()
     
     def _load_rel(self):
         super()._load_grid_rel()
@@ -38,6 +42,10 @@ class MyModelGridDataset(TrafficStateGridDataset):
         y = y[:, :, id_list, :]
         return self._split_train_val_test(x, y)
     
+    def _initialize_tokenizer(self):
+        self.tokenizer.add_tokens([DEFAULT_ST_PATCH_TOKEN, DEFAULT_ST_START_TOKEN, DEFAULT_ST_END_TOKEN], special_tokens=True)
+        self.tokenizer.pad_token = self.tokenizer.unk_token
+    
     def gen_timeslot_str(self, timeslot_id):
         time_strs = []
         seq = [timeslot_id, 
@@ -45,7 +53,7 @@ class MyModelGridDataset(TrafficStateGridDataset):
                timeslot_id + self.input_window, 
                timeslot_id + self.input_window + self.output_window - 1]
         for id in seq:  
-            d = self.timesolts[timeslot_id].astype("datetime64[s]")
+            d = self.timesolts[id].astype("datetime64[s]")
             d = datetime.datetime.strptime(str(d), '%Y-%m-%dT%H:%M:%S')
             formatted_date = str(d.strftime("%B %d, %Y, %H:%M, %A"))
             time_strs.append(formatted_date)
@@ -69,6 +77,19 @@ the provided time and regional information, and then generate the predictive tok
         #TODO
         return None
         
+    def _tokenizer_fn(self, text):
+        tokenzied_text = self.tokenizer(
+            text,
+            return_tensors='pt',
+            padding='longest',
+            max_length= self.tokenizer.model_max_length,
+            truncation=True,
+        )
+        input_ids = labels = tokenzied_text.input_ids[0]
+        print(input_ids.shape)
+        assert(False)
+        # input_ids_lens = labels_len = tokenzied_text.input_ids.ne(self.tokenizer.pad_token_id).sum().item()
+    
     def gen_final_data(self, timeslot_id, region_id, flows):
         # F * T
         BEGIN_SIGNAL = '###'
@@ -85,6 +106,7 @@ the provided time and regional information, and then generate the predictive tok
         for i in prompts:
             final_prompt += BEGIN_SIGNAL + i + END_SIGNAL
         final_prompt += BEGIN_SIGNAL
+        self._tokenizer_fn(final_prompt)
             
     def process(self, data_x):
         final_data = []
@@ -121,7 +143,7 @@ the provided time and regional information, and then generate the predictive tok
         return self.train_dataloader, self.eval_dataloader, self.test_dataloader
 
     def get_data_feature(self):
-        return {"scaler": self.scaler, "adj_mx": self.adj_mx, "sd_mx": self.sd_mx, "sh_mx": self.sh_mx,
+        return {"scaler": self.scaler, "tokenizer":self.tokenizer,
                 "ext_dim": self.ext_dim, "num_nodes": self.num_nodes, "feature_dim": self.feature_dim,
                 "output_dim": self.output_dim, "num_batches": self.num_batches,
-                "dtw_matrix": self.dtw_matrix, "pattern_keys": self.pattern_keys}
+                }
