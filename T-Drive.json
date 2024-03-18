@@ -2,7 +2,7 @@
     "dataset_class": "MyModelGridDataset",
     "input_window": 12,
     "output_window": 12,
-    "train_rate": 0.7,
+    "train_rate": 0.001,
     "eval_rate": 0.1,
     "batch_size": 4,
     "add_time_in_day": false,

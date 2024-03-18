@@ -5,8 +5,9 @@ import torch
 import numpy as np
 import datetime
 from tqdm import tqdm
+from torch.utils.data import DataLoader
 from libcity.data.dataset import TrafficStateGridDataset
-from libcity.data.utils import generate_dataloader
+from libcity.data.list_dataset import ListDataset
 from transformers import AutoTokenizer
 
 IGNORE_INDEX = -100
@@ -130,7 +131,7 @@ the provided time and regional information, and then generate the predictive tok
         cur_idx = tokenized_lens[0]
         targets[:cur_idx] = IGNORE_INDEX
         targets[cur_idx + 2:cur_idx + tokenized_lens[1]] = IGNORE_INDEX
-        data_dict = dict(input_ids=input_ids, targets=targets)
+        data_dict = dict(input_ids=input_ids, labels=targets)
         data_dict['st_data_x'] = torch.Tensor(st_data_x)
         data_dict['st_data_y'] = torch.Tensor(st_data_y)
         data_dict['region_id'] = region_id
@@ -156,19 +157,61 @@ the provided time and regional information, and then generate the predictive tok
             else:
                 x_train, y_train, x_val, y_val, x_test, y_test = self._generate_train_val_test()
         self.feature_dim = x_train.shape[-1]
-        self.process(x_train, y_train)
-        assert(False)
+        train_data = self.process(x_train, y_train)
+        # eval_data = self.process(x_val, y_val)
+        # test_data = self.process(x_test, y_test)
         
-        train_data = list(zip(x_train, y_train))
-        eval_data = list(zip(x_val, y_val))
-        test_data = list(zip(x_test, y_test))
+        # train_data = None
+        eval_data = train_data
+        test_data = train_data
         self.train_dataloader, self.eval_dataloader, self.test_dataloader = \
-            generate_dataloader(train_data, eval_data, test_data, self.feature_name,
-                                self.batch_size, self.num_workers, pad_with_last_sample=self.pad_with_last_sample,
-                                distributed=self.distributed)
+            self.generate_dataloader(train_data, eval_data, test_data, 1, self.num_workers)
         self.num_batches = len(self.train_dataloader)
+        assert(False)
         return self.train_dataloader, self.eval_dataloader, self.test_dataloader
+    
+    def generate_dataloader(self, train_data, eval_data, test_data,
+                        batch_size, num_workers, shuffle=True):
+        train_dataset = ListDataset(train_data)
+        eval_dataset = ListDataset(eval_data)
+        test_dataset = ListDataset(test_data)
+        train_sampler = None
+        eval_sampler = None
 
+        def collator(indices):
+            input_ids, labels = tuple([indice[key] for indice in indices] for key in ("input_ids", "labels"))
+            input_ids = torch.nn.utils.rnn.pad_sequence(
+                input_ids,
+                batch_first=True,
+                padding_value=self.tokenizer.pad_token_id)
+            labels = torch.nn.utils.rnn.pad_sequence(labels,
+                                                    batch_first=True,
+                                                    padding_value=IGNORE_INDEX)
+            batch = dict(
+                input_ids=input_ids,
+                labels=labels,
+                attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+            )
+
+            st_data_x_batch = [indice['st_data_x'] for indice in indices]
+            st_data_y_batch = [indice['st_data_y'] for indice in indices]
+            region_id_batch = [indice['region_id'] for indice in indices]
+            batch['st_data_x'] = st_data_x_batch
+            batch['st_data_y'] = st_data_y_batch
+            batch['region_id'] = region_id_batch
+            return batch
+        
+        train_dataloader = DataLoader(dataset=train_dataset, batch_size=batch_size,
+                                    num_workers=num_workers, collate_fn=collator,
+                                    shuffle=shuffle and train_sampler is None, sampler=train_sampler)
+        eval_dataloader = DataLoader(dataset=eval_dataset, batch_size=batch_size,
+                                    num_workers=num_workers, collate_fn=collator,
+                                    shuffle=shuffle and eval_sampler is None, sampler=eval_sampler)
+        test_dataloader = DataLoader(dataset=test_dataset, batch_size=batch_size,
+                                    num_workers=num_workers, collate_fn=collator,
+                                    shuffle=False)
+        return train_dataloader, eval_dataloader, test_dataloader
+    
     def get_data_feature(self):
         return {"scaler": self.scaler, "tokenizer":self.tokenizer,
                 "ext_dim": self.ext_dim, "num_nodes": self.num_nodes, "feature_dim": self.feature_dim,
