@@ -1,5 +1,7 @@
 import os
 import json
+import copy
+import torch
 import numpy as np
 import datetime
 from tqdm import tqdm
@@ -77,7 +79,7 @@ the provided time and regional information, and then generate the predictive tok
         #TODO
         return None
         
-    def _tokenizer_fn(self, text):
+    def _tokenize_fn(self, text):
         tokenzied_text = self.tokenizer(
             text,
             return_tensors='pt',
@@ -86,38 +88,63 @@ the provided time and regional information, and then generate the predictive tok
             truncation=True,
         )
         input_ids = labels = tokenzied_text.input_ids[0]
-        print(input_ids.shape)
-        assert(False)
-        # input_ids_lens = labels_len = tokenzied_text.input_ids.ne(self.tokenizer.pad_token_id).sum().item()
+        input_ids_lens = labels_len = tokenzied_text.input_ids.ne(self.tokenizer.pad_token_id).sum().item()
+        return dict(
+            input_ids=input_ids,
+            labels=labels,
+            input_ids_lens=input_ids_lens,
+            labels_len=labels_len,
+        )
     
-    def gen_final_data(self, timeslot_id, region_id, flows):
+    # def _mask_targets(self, )
+    
+    def gen_final_data(self, timeslot_id, region_id, flows, st_data_x, st_data_y):
         # F * T
         BEGIN_SIGNAL = '###'
         END_SIGNAL = "\n"
         header = "A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human's questions."
         time_strs = self.gen_timeslot_str(timeslot_id)
         if len(flows) == 2:
-            prompts = self.gen_in_out_flow_prompt(flows, time_strs)
+            pre_prompts = self.gen_in_out_flow_prompt(flows, time_strs)
         elif len(flows) == 1:
-            prompts = self.gen_single_flow_prompt(flows, time_strs)
+            pre_prompts = self.gen_single_flow_prompt(flows, time_strs)
         else:
             raise ValueError('unknown input')
+        # connect
+        prompts = []
         final_prompt = header + END_SIGNAL
-        for i in prompts:
-            final_prompt += BEGIN_SIGNAL + i + END_SIGNAL
+        prompts.append(header + END_SIGNAL)
+        for prompt in pre_prompts:
+            final_prompt += BEGIN_SIGNAL + prompt + END_SIGNAL
+            prompts.append(BEGIN_SIGNAL + prompt + END_SIGNAL)
         final_prompt += BEGIN_SIGNAL
-        self._tokenizer_fn(final_prompt)
+        text_tokenized = self._tokenize_fn(final_prompt)
+        input_ids = text_tokenized['input_ids']
+        targets = copy.deepcopy(input_ids)
+        tokenized_lens = [
+            self._tokenize_fn(
+                prompt
+            )["input_ids_lens"] for prompt in prompts
+        ]
+        # adding mask
+        cur_idx = tokenized_lens[0]
+        targets[:cur_idx] = IGNORE_INDEX
+        targets[cur_idx + 2:cur_idx + tokenized_lens[1]] = IGNORE_INDEX
+        data_dict = dict(input_ids=input_ids, targets=targets)
+        data_dict['st_data_x'] = torch.Tensor(st_data_x)
+        data_dict['st_data_y'] = torch.Tensor(st_data_y)
+        data_dict['region_id'] = region_id
+        return data_dict
             
-    def process(self, data_x):
+    def process(self, raw_data_x, raw_data_y):
         final_data = []
-        data_x = data_x.transpose(0, 2, 3, 1) # B N F T
+        data_x = raw_data_x.transpose(0, 2, 3, 1) # B N F T
         for i in range(len(data_x)):
             cur_time_state = data_x[i]
             for j in range(len(cur_time_state)):
                 flows = cur_time_state[j]
-                final_data.append(self.gen_final_data(i, j, flows))
-        return final_data            
-                
+                final_data.append(self.gen_final_data(i, j, flows, raw_data_x[i], raw_data_y[i]))
+        return final_data                  
 
     def get_data(self):
         x_train, y_train, x_val, y_val, x_test, y_test = [], [], [], [], [], []
@@ -129,7 +156,7 @@ the provided time and regional information, and then generate the predictive tok
             else:
                 x_train, y_train, x_val, y_val, x_test, y_test = self._generate_train_val_test()
         self.feature_dim = x_train.shape[-1]
-        self.process(x_train)
+        self.process(x_train, y_train)
         assert(False)
         
         train_data = list(zip(x_train, y_train))
