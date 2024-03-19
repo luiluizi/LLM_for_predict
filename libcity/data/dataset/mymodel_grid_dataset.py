@@ -167,6 +167,14 @@ the provided time and regional information, and then generate the predictive tok
         self.train_dataloader, self.eval_dataloader, self.test_dataloader = \
             self.generate_dataloader(train_data, eval_data, test_data, 1, self.num_workers)
         self.num_batches = len(self.train_dataloader)
+        # kk = 0
+        # for batch in self.train_dataloader:
+        #     print(batch['input_ids'].shape)
+        #     print(batch['labels'].shape)
+        #     print(len(batch['st_data_x']))
+        #     kk +=1
+        #     if kk > 5:
+        #         assert(False)
         assert(False)
         return self.train_dataloader, self.eval_dataloader, self.test_dataloader
     
@@ -215,5 +223,4 @@ the provided time and regional information, and then generate the predictive tok
     def get_data_feature(self):
         return {"scaler": self.scaler, "tokenizer":self.tokenizer,
                 "ext_dim": self.ext_dim, "num_nodes": self.num_nodes, "feature_dim": self.feature_dim,
-                "output_dim": self.output_dim, "num_batches": self.num_batches,
-                }
+                "output_dim": self.output_dim, "num_batches": self.num_batches,}
