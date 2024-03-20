@@ -1,5 +1,16 @@
 {
-    
+    "enc_drop": 0.3,
+    "enc_dilation_exponential": 1,
+    "enc_conv_channels": 32,
+    "enc_residual_channels": 32,
+    "enc_skip_channels": 64,
+    "enc_end_channels": 128,
+    "enc_layers": 3,
+
+    "llm_lin_hidden_size": 128,
+    "llm_time_steps": 12,
+    "st_hidden_size": 64,
+
 
     "scaler": "standard",
     "load_external": true,

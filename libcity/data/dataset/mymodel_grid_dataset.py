@@ -221,6 +221,6 @@ the provided time and regional information, and then generate the predictive tok
         return train_dataloader, eval_dataloader, test_dataloader
     
     def get_data_feature(self):
-        return {"scaler": self.scaler, "tokenizer":self.tokenizer,
+        return {"scaler": self.scaler, "st_start_token":self.tokenizer.convert_tokens_to_ids(DEFAULT_ST_START_TOKEN),
                 "ext_dim": self.ext_dim, "num_nodes": self.num_nodes, "feature_dim": self.feature_dim,
                 "output_dim": self.output_dim, "num_batches": self.num_batches,}

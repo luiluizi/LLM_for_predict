@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-from torch.nn import init
-import numbers
 import torch.nn.functional as F
 
 
@@ -25,24 +23,23 @@ class DilatedInception(nn.Module):
 
 
 class MyEncoder(nn.Module):
-    def __init__(self, args, dim_in, dim_out):
+    def __init__(self, config, data_feature):
         super(MyEncoder, self).__init__()
-        self.num_nodes = args.num_nodes
-        self.feature_dim = dim_in
+        self.num_nodes = data_feature.get('num_nodes', 1)
+        self.feature_dim = data_feature.get('feature_dim', 2)
+        self.output_dim = data_feature.get('output_dim', 2)
 
-        self.input_window = args.input_window
-        self.output_window = args.output_window
-        self.output_dim = dim_out
+        self.input_window = config.get('input_window', 1)
+        self.output_window = config.get('output_window', 1)
 
-        self.dropout = args.dropout
-        self.dilation_exponential = args.dilation_exponential
+        self.dropout = config.get('enc_drop', 0.1)
+        self.dilation_exponential = config.get('enc_dilation_exponential', 1)
 
-        self.conv_channels = args.conv_channels
-        self.residual_channels = args.residual_channels
-        self.skip_channels = args.skip_channels
-        self.end_channels = args.end_channels
-
-        self.layers = args.layers
+        self.conv_channels = config.get('enc_conv_channels', 32)
+        self.residual_channels = config.get('enc_residual_channels', 32)
+        self.skip_channels = config.get('enc_skip_channels', 64)
+        self.end_channels = config.get('enc_end_channels', 128)
+        self.layers = config.get('enc_layers', 3)
 
         self.filter_convs = nn.ModuleList()
         self.gate_convs = nn.ModuleList()
@@ -130,7 +127,4 @@ class MyEncoder(nn.Module):
 
         skip = self.skipE(x) + skip
         x = F.relu(skip)
-        x_emb = x.clone()
-        x = F.relu(self.end_conv_1(x))
-        x = self.end_conv_2(x)
-        return x, x_emb
+        return x
