@@ -102,7 +102,6 @@ class MyModel(AbstractTrafficStateModel):
         inputs_embeds = self.llama_model.model.embed_tokens(input_ids_copy)
         if len(st_data_x) > 1:
             st_data_x = torch.cat(st_data_x, dim=0)
-            st_data_y = torch.cat(st_data_y, dim=0)
         if type(st_data_x) is list:
             STE_out = self.st_tower(st_data_x[0][..., :2])
             if STE_out.shape[2] >= 1:

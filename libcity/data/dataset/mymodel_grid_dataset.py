@@ -139,9 +139,6 @@ the provided time and regional information, and then generate the predictive tok
             for j in range(len(cur_time_state)):
                 flows = cur_time_state[j]
                 final_data.append(self.gen_final_data(i, j, flows, raw_data_x[i], raw_data_y[i]))
-                kk += 1
-                if kk % 10000 == 0:
-                    print("t")
         return final_data  
     
     def _generate_train_val_test(self):

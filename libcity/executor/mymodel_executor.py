@@ -74,6 +74,8 @@ class MyModelExecutor(TrafficStateExecutor):
             if self.lr_scheduler is not None:
                 if self.lr_scheduler_type.lower() == 'reducelronplateau':
                     self.lr_scheduler.step(train_loss)
+                elif self.lr_scheduler_type.lower() == 'cosinelr':
+                    self.lr_scheduler.step(epoch_idx + 1)
                 else:
                     self.lr_scheduler.step()
 
