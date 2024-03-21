@@ -206,7 +206,6 @@ the provided time and regional information, and then generate the predictive tok
               for input_id, label, st_data_x, st_data_y, region_id in zip(train_cat_data['input_ids'], train_cat_data['labels'], train_cat_data['st_data_x'], train_cat_data['st_data_y'], train_cat_data['region_id'])]
         test_data = [{'input_ids': input_id, 'labels': label, 'st_data_x': st_data_x, 'st_data_y': st_data_y, 'region_id': region_id} 
               for input_id, label, st_data_x, st_data_y, region_id in zip(test_cat_data['input_ids'], test_cat_data['labels'], test_cat_data['st_data_x'], test_cat_data['st_data_y'], test_cat_data['region_id'])]
-        print(train_data[0])
         self.feature_dim = train_data[0]['st_data_x'].shape[-1]
         return train_data, test_data
                 
