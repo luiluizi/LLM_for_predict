@@ -82,6 +82,12 @@ class MyModel(AbstractTrafficStateModel):
         output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
         input_embeddings[-num_new_tokens:] = input_embeddings_avg
         output_embeddings[-num_new_tokens:] = output_embeddings_avg
+        # tune_st_mlp_adapter freeze input and tune output
+        for p in self.llama_model.get_input_embeddings().parameters():
+            p.requires_grad = False
+        for p in self.llama_model.get_output_embeddings().parameters():
+            p.requires_grad = True
+        
 
     def forward(self, batch):
         input_ids = batch['input_ids']
@@ -190,7 +196,7 @@ class MyModel(AbstractTrafficStateModel):
         assert(False, "No labels provided!")
 
     def calculate_loss(self, batch):
-        labels_stpre, regress_result, classificate_result, shift_logits, shift_labels = self.predict(batch)
+        labels_stpre, regress_result, classificate_result, shift_logits, shift_labels = self.forward(batch)
         loss_fct = CrossEntropyLoss()
         rec_loss = scaler_mae_loss(scaler=None, mask_value=None)
         bce_loss = BCEWithLogitsLoss()
@@ -204,4 +210,5 @@ class MyModel(AbstractTrafficStateModel):
         return loss
 
     def predict(self, batch):
-        return self.forward(batch)
+        labels_stpre, regress_result, classificate_result, shift_logits, shift_labels = self.forward(batch)
+        return labels_stpre, regress_result

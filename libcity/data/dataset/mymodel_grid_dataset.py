@@ -9,6 +9,8 @@ from torch.utils.data import DataLoader
 from libcity.data.dataset import TrafficStateGridDataset
 from libcity.data.list_dataset import ListDataset
 from transformers import AutoTokenizer
+from libcity.utils import ensure_dir
+import pickle
 
 IGNORE_INDEX = -100
 DEFAULT_ST_PATCH_TOKEN = "<ST_patch>"
@@ -23,7 +25,9 @@ class MyModelGridDataset(TrafficStateGridDataset):
         self.loc = self.config.get('loc', 'unknown place')
         self.random_regions = 40
         self.cache_file_name = os.path.join('./libcity/cache/dataset_cache/',
-                                            'mymodel_grid_based_{}.npz'.format(self.parameters_str))
+                                            'mymodel_grid_based_{}'.format(self.parameters_str))
+        self.train_cache_file_name = self.cache_file_name + "_train.pkl"
+        self.test_cache_file_name = self.cache_file_name + "_test.pkl"
         self.tokenizer = AutoTokenizer.from_pretrained(
             "/home/panda/private/jjw/hck/br/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T",
             model_max_length = 2048,
@@ -34,16 +38,6 @@ class MyModelGridDataset(TrafficStateGridDataset):
     
     def _load_rel(self):
         super()._load_grid_rel()
-        
-    def _generate_train_val_test(self):
-        script_dir = os.path.dirname(__file__)
-        file_path = os.path.join(script_dir, 'chosen_data_id_40.json')
-        with open(file_path, 'r') as f:
-            id_list = np.array(json.load(f)[self.dataset][0])
-        x, y = self._generate_data()
-        x = x[:, :, id_list, :]
-        y = y[:, :, id_list, :]
-        return self._split_train_val_test(x, y)
     
     def _initialize_tokenizer(self):
         self.tokenizer.add_tokens([DEFAULT_ST_PATCH_TOKEN, DEFAULT_ST_START_TOKEN, DEFAULT_ST_END_TOKEN], special_tokens=True)
@@ -97,8 +91,6 @@ the provided time and regional information, and then generate the predictive tok
             labels_len=labels_len,
         )
     
-    # def _mask_targets(self, )
-    
     def gen_final_data(self, timeslot_id, region_id, flows, st_data_x, st_data_y):
         # F * T
         BEGIN_SIGNAL = '###'
@@ -140,42 +132,110 @@ the provided time and regional information, and then generate the predictive tok
     def process(self, raw_data_x, raw_data_y):
         final_data = []
         data_x = raw_data_x.transpose(0, 2, 3, 1) # B N F T
+        kk = 0
+        print(len(data_x)*len(data_x[0]))
         for i in range(len(data_x)):
             cur_time_state = data_x[i]
             for j in range(len(cur_time_state)):
                 flows = cur_time_state[j]
                 final_data.append(self.gen_final_data(i, j, flows, raw_data_x[i], raw_data_y[i]))
-        return final_data                  
+                kk += 1
+                if kk % 10000 == 0:
+                    print("t")
+        return final_data  
+    
+    def _generate_train_val_test(self):
+        script_dir = os.path.dirname(__file__)
+        file_path = os.path.join(script_dir, 'chosen_data_id_40.json')
+        with open(file_path, 'r') as f:
+            id_list = np.array(json.load(f)[self.dataset][0])
+        x, y = self._generate_data()
+        x = x[:, :, id_list, :]
+        y = y[:, :, id_list, :]
+        self.feature_dim = x.shape[-1]
+        return self._split_train_val_test(x, y)
+    
+    def _split_train_val_test(self, x, y):
+        test_rate = 1 - self.train_rate - self.eval_rate
+        num_samples = x.shape[0]
+        num_test = round(num_samples * test_rate)
+        num_train = round(num_samples * self.train_rate)
+        num_val = num_samples - num_test - num_train
+
+        x_train, y_train = x[int(num_train*(1 - self.part_train_rate)):num_train], y[int(num_train*(1 - self.part_train_rate)):num_train]
+        x_val, y_val = x[num_train: num_train + num_val], y[num_train: num_train + num_val]
+        x_test, y_test = x[-num_test:], y[-num_test:]
+        
+        train_data = self.process(x_train, y_train)
+        test_data = self.process(x_test, y_test)
+        train_data_dict = {
+            'input_ids': [d['input_ids'] for d in train_data],
+            'labels': [d['labels'] for d in train_data],
+            'st_data_x': [d['st_data_x'] for d in train_data],
+            'st_data_y': [d['st_data_y'] for d in train_data],
+            'region_id': [d['region_id'] for d in train_data],
+        }
+        test_data_dict = {
+            'input_ids': [d['input_ids'] for d in test_data],
+            'labels': [d['labels'] for d in test_data],
+            'st_data_x': [d['st_data_x'] for d in test_data],
+            'st_data_y': [d['st_data_y'] for d in test_data],
+            'region_id': [d['region_id'] for d in test_data],
+        }
+        if self.rank == 0 and self.cache_dataset:
+            ensure_dir(self.cache_file_folder)
+            # np.savez_compressed(self.train_cache_file_name, **train_data_dict)
+            # np.savez_compressed(self.test_cache_file_name, **test_data_dict)
+            with open(self.train_cache_file_name, 'wb') as f:
+                pickle.dump(train_data_dict, f)
+
+            with open(self.test_cache_file_name, 'wb') as f:
+                pickle.dump(test_data_dict, f)
+            self._logger.info('Saved at ' + self.train_cache_file_name + ", and"+ self.test_cache_file_name)
+        return train_data, test_data
+    
+    def _load_cache_train_val_test(self):
+        self._logger.info('Loading ' + self.cache_file_name)
+        # train_cat_data = np.load(self.train_cache_file_name)
+        # test_cat_data = np.load(self.test_cache_file_name)
+        with open(self.train_cache_file_name, 'rb') as f:
+            train_cat_data = pickle.load(f)
+        with open(self.test_cache_file_name, 'rb') as f:
+            test_cat_data = pickle.load(f)
+        train_data = [{'input_ids': input_id, 'labels': label, 'st_data_x': st_data_x, 'st_data_y': st_data_y, 'region_id': region_id} 
+              for input_id, label, st_data_x, st_data_y, region_id in zip(train_cat_data['input_ids'], train_cat_data['labels'], train_cat_data['st_data_x'], train_cat_data['st_data_y'], train_cat_data['region_id'])]
+        test_data = [{'input_ids': input_id, 'labels': label, 'st_data_x': st_data_x, 'st_data_y': st_data_y, 'region_id': region_id} 
+              for input_id, label, st_data_x, st_data_y, region_id in zip(test_cat_data['input_ids'], test_cat_data['labels'], test_cat_data['st_data_x'], test_cat_data['st_data_y'], test_cat_data['region_id'])]
+        print(train_data[0])
+        self.feature_dim = train_data[0]['st_data_x'].shape[-1]
+        return train_data, test_data
+                
 
     def get_data(self):
-        x_train, y_train, x_val, y_val, x_test, y_test = [], [], [], [], [], []
+        train_data, test_data = [], []
         self._load_grid_3d(self.data_files[0]) #get time information
         if self.data is None:
             self.data = {}
-            if self.cache_dataset and os.path.exists(self.cache_file_name):
-                x_train, y_train, x_val, y_val, x_test, y_test = self._load_cache_train_val_test()
+            if self.cache_dataset and os.path.exists(self.train_cache_file_name) and os.path.exists(self.test_cache_file_name):
+                train_data, test_data = self._load_cache_train_val_test()
             else:
-                x_train, y_train, x_val, y_val, x_test, y_test = self._generate_train_val_test()
-        self.feature_dim = x_train.shape[-1]
-        train_data = self.process(x_train, y_train)
-        # eval_data = self.process(x_val, y_val)
+                train_data, test_data = self._generate_train_val_test()
+        # train_data = self.process(x_train, y_train)
         # test_data = self.process(x_test, y_test)
         
         # train_data = None
-        eval_data = train_data
-        test_data = train_data
-        self.train_dataloader, self.eval_dataloader, self.test_dataloader = \
-            self.generate_dataloader(train_data, eval_data, test_data, self.batch_size, self.num_workers)
+        # eval_data = train_data
+        # test_data = train_data
+        self.train_dataloader, self.test_dataloader = \
+            self.generate_dataloader(train_data, test_data, self.batch_size, self.num_workers)
         self.num_batches = len(self.train_dataloader)
-        return self.train_dataloader, self.eval_dataloader, self.test_dataloader
+        return self.train_dataloader, None, self.test_dataloader
     
-    def generate_dataloader(self, train_data, eval_data, test_data,
+    def generate_dataloader(self, train_data, test_data,
                         batch_size, num_workers, shuffle=True):
         train_dataset = ListDataset(train_data)
-        eval_dataset = ListDataset(eval_data)
         test_dataset = ListDataset(test_data)
         train_sampler = None
-        eval_sampler = None
 
         def collator(indices):
             input_ids, labels = tuple([indice[key] for indice in indices] for key in ("input_ids", "labels"))
@@ -200,16 +260,13 @@ the provided time and regional information, and then generate the predictive tok
             batch['region_id'] = region_id_batch
             return batch
         
-        train_dataloader = DataLoader(dataset=train_dataset, batch_size=1,
+        train_dataloader = DataLoader(dataset=train_dataset, batch_size=batch_size,
                                     num_workers=num_workers, collate_fn=collator,
                                     shuffle=shuffle and train_sampler is None, sampler=train_sampler)
-        eval_dataloader = DataLoader(dataset=eval_dataset, batch_size=batch_size,
-                                    num_workers=num_workers, collate_fn=collator,
-                                    shuffle=shuffle and eval_sampler is None, sampler=eval_sampler)
         test_dataloader = DataLoader(dataset=test_dataset, batch_size=batch_size,
                                     num_workers=num_workers, collate_fn=collator,
                                     shuffle=False)
-        return train_dataloader, eval_dataloader, test_dataloader
+        return train_dataloader, test_dataloader
     
     def get_data_feature(self):
         return {"scaler": self.scaler, "tokenizer": self.tokenizer,
