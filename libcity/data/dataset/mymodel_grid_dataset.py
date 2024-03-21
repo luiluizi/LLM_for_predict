@@ -132,8 +132,8 @@ the provided time and regional information, and then generate the predictive tok
         targets[:cur_idx] = IGNORE_INDEX
         targets[cur_idx + 2:cur_idx + tokenized_lens[1]] = IGNORE_INDEX
         data_dict = dict(input_ids=input_ids, labels=targets)
-        data_dict['st_data_x'] = torch.Tensor(st_data_x)
-        data_dict['st_data_y'] = torch.Tensor(st_data_y)
+        data_dict['st_data_x'] = torch.Tensor(st_data_x).unsqueeze(0)
+        data_dict['st_data_y'] = torch.Tensor(st_data_y).unsqueeze(0)
         data_dict['region_id'] = region_id
         return data_dict
             
@@ -165,17 +165,8 @@ the provided time and regional information, and then generate the predictive tok
         eval_data = train_data
         test_data = train_data
         self.train_dataloader, self.eval_dataloader, self.test_dataloader = \
-            self.generate_dataloader(train_data, eval_data, test_data, 1, self.num_workers)
+            self.generate_dataloader(train_data, eval_data, test_data, self.batch_size, self.num_workers)
         self.num_batches = len(self.train_dataloader)
-        # kk = 0
-        # for batch in self.train_dataloader:
-        #     print(batch['input_ids'].shape)
-        #     print(batch['labels'].shape)
-        #     print(len(batch['st_data_x']))
-        #     kk +=1
-        #     if kk > 5:
-        #         assert(False)
-        assert(False)
         return self.train_dataloader, self.eval_dataloader, self.test_dataloader
     
     def generate_dataloader(self, train_data, eval_data, test_data,
@@ -221,6 +212,7 @@ the provided time and regional information, and then generate the predictive tok
         return train_dataloader, eval_dataloader, test_dataloader
     
     def get_data_feature(self):
-        return {"scaler": self.scaler, "st_start_token":self.tokenizer.convert_tokens_to_ids(DEFAULT_ST_START_TOKEN),
+        return {"scaler": self.scaler, "tokenizer": self.tokenizer,
+                "st_start_token":self.tokenizer.convert_tokens_to_ids(DEFAULT_ST_START_TOKEN),
                 "ext_dim": self.ext_dim, "num_nodes": self.num_nodes, "feature_dim": self.feature_dim,
                 "output_dim": self.output_dim, "num_batches": self.num_batches,}

@@ -107,7 +107,7 @@ class MyEncoder(nn.Module):
         inputs = inputs.transpose(1, 3)  # (batch_size, feature_dim, num_nodes, input_window)
         if self.input_window < self.receptive_field:
             inputs = nn.functional.pad(inputs, (self.receptive_field-self.input_window, 0, 0, 0))
-
+        print("tensor"+str(inputs.device)+" model:"+str(next(self.parameters()).device))
         x = self.start_conv(inputs)
         skip = self.skip0(F.dropout(inputs, self.dropout, training=self.training))
         for i in range(self.layers):

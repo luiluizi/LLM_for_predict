@@ -1,15 +1,20 @@
 {
     "traffic_state_pred": {
         "allowed_model": [
-            "PDFormer"
+            "PDFormer", "MyModel"
         ],
         "allowed_dataset": [
             "PeMS04", "PeMS07", "PeMS08",
             "NYCTaxi", "T-Drive", "CHIBike"
         ],
         "PDFormer": {
-            "dataset_class": "MYModelGridDataset",
+            "dataset_class": "MyModelGridDataset",
             "executor": "PDFormerExecutor",
+            "evaluator": "TrafficStateEvaluator"
+        },
+        "MyModel": {
+            "dataset_class": "MyModelGridDataset",
+            "executor": "MyModelExecutor",
             "evaluator": "TrafficStateEvaluator"
         }
     }
