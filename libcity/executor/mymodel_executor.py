@@ -118,7 +118,7 @@ class MyModelExecutor(TrafficStateExecutor):
     #     return min_val_loss
 
     def _train_epoch(self, train_dataloader, epoch_idx, batches_seen=None, loss_func=None):
-        self.model.to(torch.bfloat16)
+        # self.model.to(torch.bfloat16)
         self.model.train()
         loss_func = loss_func if loss_func is not None else self.model.calculate_loss
         losses = []
@@ -140,6 +140,7 @@ class MyModelExecutor(TrafficStateExecutor):
             if batches_seen % self.grad_accmu_steps == 0:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
+        assert(False)
         return losses, batches_seen
 
     def _valid_epoch(self, eval_dataloader, epoch_idx, batches_seen=None, loss_func=None):

@@ -34,6 +34,7 @@ def scaler_mae_loss(scaler=None, mask_value=None):
 
 class MyModel(AbstractTrafficStateModel):
     def __init__(self, config, data_feature):
+        torch.autograd.set_detect_anomaly(True)
         super().__init__(config, data_feature)
         self.config = config
         self.llama_config = None
@@ -41,13 +42,11 @@ class MyModel(AbstractTrafficStateModel):
         self.st_start_id0, self.st_start_id1, self.st_start_id2, self.st_end_id1, self.st_end_id2 = -1, -1, -1, -1, -1
         self.llama_model = None
         self.tokenizer = data_feature.get('tokenizer')
-        # self.initialize_llm_model()
+        self.initialize_llm_model()
         self.feature_dim = data_feature.get('feature_dim', 1)
         self.st_tower = MyEncoder(config, data_feature)
-        # self.hidden_size = self.llama_model.config.hidden_size
-        # self.vocab_size = self.llama_model.config.vocab_size
-        self.hidden_size = 2048
-        self.vocab_size = 32000
+        self.hidden_size = self.llama_model.config.hidden_size
+        self.vocab_size = self.llama_model.config.vocab_size
         self.lin_hidden_size = config.get('llm_lin_hidden_size', 128)
         self.time_steps = config.get('llm_time_steps', 12)
         self.st_hidden_size = config.get('st_hidden_size', 64)
@@ -62,11 +61,21 @@ class MyModel(AbstractTrafficStateModel):
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
         self.st_pre_res = []
+        self.convert_type()
+        
+    def convert_type(self):
+        self.st_projector.to(torch.bfloat16)
+        self.st_pred_linear_1.to(torch.bfloat16)
+        self.st_pred_linear_2.to(torch.bfloat16)
+        self.st_pred_linear_3.to(torch.bfloat16)
+        self.lm_head.to(torch.bfloat16)
     
     def initialize_llm_model(self):
         path = '/home/panda/private/jjw/hck/br/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T'
-        self.llama_model = LlamaForCausalLM.from_pretrained(path)
+        self.llama_model = LlamaForCausalLM.from_pretrained(path).to(torch.bfloat16)
         num_new_tokens = 2  # start and end
+        # 使新加入的特殊token的嵌入获取不是随机初始化的
+        self.llama_model.resize_token_embeddings(len(self.tokenizer))
         input_embeddings = self.llama_model.get_input_embeddings().weight.data
         output_embeddings = self.llama_model.get_output_embeddings().weight.data
         input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
@@ -81,8 +90,10 @@ class MyModel(AbstractTrafficStateModel):
         st_data_y = batch['st_data_y']
         region_id = batch['region_id']
         labels = batch['labels'] 
-        
         # inputs_embeds = self.llama_model.model.embed_tokens(input_ids)
+        # ？？？？ one of the variables needed for gradient computation has been modified by an inplace operation:
+        input_ids_copy = input_ids.clone()
+        inputs_embeds = self.llama_model.model.embed_tokens(input_ids_copy)
         if len(st_data_x) > 1:
             st_data_x = torch.cat(st_data_x, dim=0)
             st_data_y = torch.cat(st_data_y, dim=0)
@@ -125,12 +136,12 @@ class MyModel(AbstractTrafficStateModel):
         
         if labels is not None:
             st_pre_embs1 = hidden_states[:,
-                           self.model.st_start_id0 + 1:self.model.st_start_id0 + self.feature_dim + 1,
+                           self.st_start_id0 + 1:self.st_start_id0 + self.feature_dim + 1,
                            :].detach().reshape(batch_size, -1, self.feature_dim, self.hidden_size)
             # # [4, 1, 2, 4096]-->[4, 1, 2, 128]
             st_pre_out1 = self.relu(self.st_pred_linear_1(st_pre_embs1))
             st_pre_embs2 = hidden_states[:,
-                           self.model.st_start_id1 + 1:self.model.st_start_id1 + self.feature_dim + 1,
+                           self.st_start_id1 + 1:self.st_start_id1 + self.feature_dim + 1,
                            :].reshape(batch_size, -1, self.feature_dim, self.hidden_size)
             # # [4, 1, 2, 4096]-->[4, 1, 2, 128]
             st_pre_out2 = self.relu(self.st_pred_linear_3(st_pre_embs2))
@@ -190,7 +201,6 @@ class MyModel(AbstractTrafficStateModel):
         loss_classificate = bce_loss(classificate_result, labels_classificate)
 
         loss = loss_fct(shift_logits, shift_labels) + loss_regress + loss_classificate
-        assert(False)
         return loss
 
     def predict(self, batch):

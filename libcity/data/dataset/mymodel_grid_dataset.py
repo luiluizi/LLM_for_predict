@@ -200,7 +200,7 @@ the provided time and regional information, and then generate the predictive tok
             batch['region_id'] = region_id_batch
             return batch
         
-        train_dataloader = DataLoader(dataset=train_dataset, batch_size=batch_size,
+        train_dataloader = DataLoader(dataset=train_dataset, batch_size=1,
                                     num_workers=num_workers, collate_fn=collator,
                                     shuffle=shuffle and train_sampler is None, sampler=train_sampler)
         eval_dataloader = DataLoader(dataset=eval_dataset, batch_size=batch_size,
