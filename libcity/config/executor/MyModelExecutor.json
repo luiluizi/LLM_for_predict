@@ -21,6 +21,8 @@
     "lr_eta_min": 0,
     "lr_patience": 10,
     "lr_threshold": 1e-4,
+    "lr_warmup_epoch": 5,
+    "lr_warmup_init": 1e-6,
     "clip_grad_norm": false,
     "max_grad_norm": 1.0,
     "use_early_stop": false,
@@ -29,6 +31,7 @@
     "log_every": 1,
     "saved_model": true,
     "load_best_epoch": true,
-    "hyper_tune": false
+    "hyper_tune": false,
+    "grad_accmu_steps": 1
   }
   

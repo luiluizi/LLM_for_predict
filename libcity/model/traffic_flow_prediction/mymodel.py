@@ -34,7 +34,7 @@ def scaler_mae_loss(scaler=None, mask_value=None):
 
 class MyModel(AbstractTrafficStateModel):
     def __init__(self, config, data_feature):
-        torch.autograd.set_detect_anomaly(True)
+        # torch.autograd.set_detect_anomaly(True)
         super().__init__(config, data_feature)
         self.config = config
         self.llama_config = None
@@ -189,7 +189,7 @@ class MyModel(AbstractTrafficStateModel):
                     regress_idx_list.append(i)
                     classificate_result_list.append(st_pre_final[i:i + 1, ...].detach())
                     regress_result_list.append(st_pre_final[i:i + 1, ...])
-            regress_result = torch.cat(regress_result_list, dim=0)
+            regress_result = torch.cat(regress_result_list, dim=0) # (1, 1, 12, 2)
             classificate_result = torch.cat(classificate_result_list, dim=0)
             return labels_stpre, regress_result, classificate_result, shift_logits, shift_labels
         assert(False, "No labels provided!")

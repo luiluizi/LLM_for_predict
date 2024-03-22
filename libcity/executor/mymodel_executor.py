@@ -22,10 +22,15 @@ class MyModelExecutor(TrafficStateExecutor):
             y_truths = []
             y_preds = []
             for batch in test_dataloader:
-                batch.to_tensor(self.device)
+                for k, v in batch.items():
+                    if torch.is_tensor(v):
+                        batch[k] = v.to(self.device)
+                    elif type(v) is list and torch.is_tensor(v[0]):
+                        for i in range(len(v)):
+                            batch[k][i] = v[i].to(self.device)
                 y_true, y_pred = self.model(batch) if self.distributed else self.model.predict(batch)
-                y_truths.append(y_true.cpu().numpy())
-                y_preds.append(y_pred.cpu().numpy())
+                y_truths.append(y_true.float().cpu().numpy())
+                y_preds.append(y_pred.float().cpu().numpy())
             y_preds = np.concatenate(y_preds, axis=0)
             y_truths = np.concatenate(y_truths, axis=0)
             outputs = {'prediction': y_preds, 'truth': y_truths}
@@ -60,17 +65,6 @@ class MyModelExecutor(TrafficStateExecutor):
             self._logger.info("epoch complete!")
             end_time = time.time()
             epoch_time = end_time - start_time
-
-            # self._logger.info("evaluating now!")
-            # t2 = time.time()
-            # val_loss = self._valid_epoch(eval_dataloader, epoch_idx, batches_seen, self.loss_func)
-            # end_time = time.time()
-            # eval_time.append(end_time - t2)
-
-            # epoch_time = end_time - start_time
-            # if self.distributed:
-            #     epoch_time = reduce_array(np.array(epoch_time), self.world_size, self.device)
-
             if self.lr_scheduler is not None:
                 if self.lr_scheduler_type.lower() == 'reducelronplateau':
                     self.lr_scheduler.step(train_loss)
@@ -142,6 +136,9 @@ class MyModelExecutor(TrafficStateExecutor):
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
             if batches_seen % self.grad_accmu_steps == 0:
                 self.optimizer.step()
+                if self.lr_scheduler is not None:
+                    if self.lr_scheduler_type.lower() == 'cosinelr':
+                        self.lr_scheduler.step_update(num_updates=batches_seen)
                 self.optimizer.zero_grad()
         return losses, batches_seen
 
@@ -226,3 +223,22 @@ class MyModelExecutor(TrafficStateExecutor):
         else:
             lr_scheduler = None
         return lr_scheduler
+    
+    def save_model_with_step(self, step):
+        ensure_dir(self.cache_dir)
+        config = dict()
+        config['model_state_dict'] = self.model.state_dict()
+        config['optimizer_state_dict'] = self.optimizer.state_dict()
+        config['step'] = step
+        model_path = self.cache_dir + '/' + self.config['model'] + '_' + self.config['dataset'] + '_step%d.tar' % step
+        torch.save(config, model_path)
+        self._logger.info("Saved model at {}".format(step))
+        return model_path
+
+    def load_model_with_step(self, step):
+        model_path = self.cache_dir + '/' + self.config['model'] + '_' + self.config['dataset'] + '_step%d.tar' % step
+        assert os.path.exists(model_path), 'Weights at step %d not found' % step
+        checkpoint = torch.load(model_path, map_location='cpu')
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self._logger.info("Loaded model at {}".format(step))

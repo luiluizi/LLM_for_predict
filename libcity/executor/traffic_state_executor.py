@@ -19,7 +19,7 @@ class TrafficStateExecutor(AbstractExecutor):
         self.config = config
         # self.device = self.config.get('device', torch.device('cpu'))
         # self.device = torch.device('cpu')
-        self.device = torch.device(type='cuda', index=1)
+        self.device = torch.device(type='cuda', index=2)
         self.model = model.to(self.device)
         self.exp_id = self.config.get('exp_id', None)
 
