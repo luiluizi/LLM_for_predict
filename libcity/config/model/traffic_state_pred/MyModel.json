@@ -44,5 +44,6 @@
     "bidir": false,
     "far_mask_delta": 5,
     "dtw_delta": 5,
-    "set_loss": "masked_mae"
+    "set_loss": "masked_mae",
+    "enc_pretrain": true
 }

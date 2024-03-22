@@ -41,17 +41,17 @@ class MyModel(AbstractTrafficStateModel):
         self.st_start_token = data_feature.get('st_start_token', -1)
         self.st_start_id0, self.st_start_id1, self.st_start_id2, self.st_end_id1, self.st_end_id2 = -1, -1, -1, -1, -1
         self.llama_model = None
-        self.tokenizer = data_feature.get('tokenizer')
-        self.initialize_llm_model()
         self.feature_dim = data_feature.get('feature_dim', 1)
-        self.st_tower = MyEncoder(config, data_feature)
-        self.hidden_size = self.llama_model.config.hidden_size
-        self.vocab_size = self.llama_model.config.vocab_size
         self.lin_hidden_size = config.get('llm_lin_hidden_size', 128)
         self.time_steps = config.get('llm_time_steps', 12)
         self.st_hidden_size = config.get('st_hidden_size', 64)
+        self.tokenizer = data_feature.get('tokenizer')
+        self.initialize_llm_model()
+        self.hidden_size = self.llama_model.config.hidden_size
+        self.vocab_size = self.llama_model.config.vocab_size
+        self.st_tower = MyEncoder(config, data_feature)
+        self.initialize_encoder()
         self.st_projector = nn.Linear(self.st_hidden_size, self.hidden_size)
-        
         self.lm_head = nn.Linear(self.hidden_size, self.vocab_size, bias=False)
 
         self.st_pred_linear_1 = nn.Linear(self.hidden_size, self.lin_hidden_size)
@@ -69,6 +69,15 @@ class MyModel(AbstractTrafficStateModel):
         self.st_pred_linear_2.to(torch.bfloat16)
         self.st_pred_linear_3.to(torch.bfloat16)
         self.lm_head.to(torch.bfloat16)
+        
+    def initialize_encoder(self):
+        path = '/home/panda/private/jjw/hck/br/LLM_for_predict/checkpoints/myencoder_pretrain.pth'
+        load_state_dict = torch.load(path)
+        cur_state_dict = self.st_tower.state_dict()
+        for name, weight in load_state_dict.items():
+            if 'predictor' in name:
+                cur_name = name.replace('predictor.', '')
+                cur_state_dict[cur_name].copy_(weight)
     
     def initialize_llm_model(self):
         path = '/home/panda/private/jjw/hck/br/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T'
@@ -143,16 +152,16 @@ class MyModel(AbstractTrafficStateModel):
             st_pre_embs1 = hidden_states[:,
                            self.st_start_id0 + 1:self.st_start_id0 + self.feature_dim + 1,
                            :].detach().reshape(batch_size, -1, self.feature_dim, self.hidden_size)
-            # # [4, 1, 2, 4096]-->[4, 1, 2, 128]
+            # 4096 --> 128
             st_pre_out1 = self.relu(self.st_pred_linear_1(st_pre_embs1))
             st_pre_embs2 = hidden_states[:,
                            self.st_start_id1 + 1:self.st_start_id1 + self.feature_dim + 1,
                            :].reshape(batch_size, -1, self.feature_dim, self.hidden_size)
-            # # [4, 1, 2, 4096]-->[4, 1, 2, 128]
+            # 4096 --> 128
             st_pre_out2 = self.relu(self.st_pred_linear_3(st_pre_embs2))
-            # # [4, 1, 2, 256]-->[4, 1, 2, 12]
+            # 256 --> 12
             st_pre_final = self.st_pred_linear_2(torch.cat([st_pre_out1, st_pre_out2], dim=-1))
-            # # [4, 1, 2, 12]-->[4, 1, 12, 2]
+            # 12 --> 2
             st_pre_final = st_pre_final.transpose(-1, -2)
             
         logits = self.lm_head(hidden_states)
@@ -168,46 +177,27 @@ class MyModel(AbstractTrafficStateModel):
             if len(st_data_y) > 1:
                 st_data_y = torch.cat(st_data_y, dim=0)
                 labels_stpre = st_data_y[:, :, region_id[0]:region_id[0] + 1, :self.feature_dim].transpose(1, 2).to(torch.bfloat16)
-                task_type_all = st_data_y[:, 0, region_id[0], -1]
             else:
                 labels_stpre = st_data_y[0][0:1, :, region_id[0]:region_id[0] + 1, :self.feature_dim].transpose(1, 2).to(torch.bfloat16)
-                task_type_all = st_data_y[0][0:1, 0, region_id[0], -1]
 
             regress_idx_list = []
-            classificate_idx_list = []
             regress_result_list = []
-            classificate_result_list = []
             for i in range(batch_size):
-                task_type = task_type_all[i]
-                # classification
-                if task_type == 3 or task_type == 4:
-                    classificate_idx_list.append(i)
-                    regress_result_list.append(st_pre_final[i:i + 1, ...].detach())
-                    classificate_result_list.append(st_pre_final[i:i + 1, ...])
-                # regression
-                else:
-                    regress_idx_list.append(i)
-                    classificate_result_list.append(st_pre_final[i:i + 1, ...].detach())
-                    regress_result_list.append(st_pre_final[i:i + 1, ...])
+                regress_idx_list.append(i)
+                regress_result_list.append(st_pre_final[i:i + 1, ...])
             regress_result = torch.cat(regress_result_list, dim=0) # (1, 1, 12, 2)
-            classificate_result = torch.cat(classificate_result_list, dim=0)
-            return labels_stpre, regress_result, classificate_result, shift_logits, shift_labels
+            return labels_stpre, regress_result, shift_logits, shift_labels
         assert(False, "No labels provided!")
 
     def calculate_loss(self, batch):
-        labels_stpre, regress_result, classificate_result, shift_logits, shift_labels = self.forward(batch)
+        labels_stpre, regress_result, shift_logits, shift_labels = self.forward(batch)
         loss_fct = CrossEntropyLoss()
         rec_loss = scaler_mae_loss(scaler=None, mask_value=None)
-        bce_loss = BCEWithLogitsLoss()
         loss_regress = rec_loss(regress_result, labels_stpre)
-        labels_classificate = labels_stpre
-        labels_classificate[labels_classificate >= 1] = 1
-        labels_classificate[labels_classificate < 1] = 0
-        loss_classificate = bce_loss(classificate_result, labels_classificate)
 
-        loss = loss_fct(shift_logits, shift_labels) + loss_regress + loss_classificate
+        loss = loss_fct(shift_logits, shift_labels) + loss_regress
         return loss
 
     def predict(self, batch):
-        labels_stpre, regress_result, classificate_result, shift_logits, shift_labels = self.forward(batch)
+        labels_stpre, regress_result, shift_logits, shift_labels = self.forward(batch)
         return labels_stpre, regress_result
