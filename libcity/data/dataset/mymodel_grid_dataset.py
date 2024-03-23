@@ -91,7 +91,7 @@ the provided time and regional information, and then generate the predictive tok
             labels_len=labels_len,
         )
     
-    def gen_final_data(self, timeslot_id, region_id, flows, st_data_x, st_data_y):
+    def gen_final_data(self, timeslot_id, region_id, flows, st_data_x, st_data_y, is_eval = False):
         # F * T
         BEGIN_SIGNAL = '###'
         END_SIGNAL = "\n"
@@ -110,35 +110,40 @@ the provided time and regional information, and then generate the predictive tok
         for prompt in pre_prompts:
             final_prompt += BEGIN_SIGNAL + prompt + END_SIGNAL
             prompts.append(BEGIN_SIGNAL + prompt + END_SIGNAL)
+            if is_eval:
+                final_prompt += "gpt:"
+                break
         final_prompt += BEGIN_SIGNAL
         text_tokenized = self._tokenize_fn(final_prompt)
         input_ids = text_tokenized['input_ids']
-        targets = copy.deepcopy(input_ids)
-        tokenized_lens = [
-            self._tokenize_fn(
-                prompt
-            )["input_ids_lens"] for prompt in prompts
-        ]
-        # adding mask
-        cur_idx = tokenized_lens[0]
-        targets[:cur_idx] = IGNORE_INDEX
-        targets[cur_idx + 2:cur_idx + tokenized_lens[1]] = IGNORE_INDEX
-        data_dict = dict(input_ids=input_ids, labels=targets)
+        data_dict = dict(input_ids=input_ids)
+        targets = None
+        if not is_eval:
+            targets = copy.deepcopy(input_ids)
+            tokenized_lens = [
+                self._tokenize_fn(
+                    prompt
+                )["input_ids_lens"] for prompt in prompts
+            ]
+            # adding mask
+            cur_idx = tokenized_lens[0]
+            targets[:cur_idx] = IGNORE_INDEX
+            targets[cur_idx + 2:cur_idx + tokenized_lens[1]] = IGNORE_INDEX
+        data_dict['labels'] = targets
         data_dict['st_data_x'] = torch.Tensor(st_data_x).unsqueeze(0)
         data_dict['st_data_y'] = torch.Tensor(st_data_y).unsqueeze(0)
         data_dict['region_id'] = region_id
         return data_dict
             
-    def process(self, raw_data_x, raw_data_y):
+    def process(self, raw_data_x, raw_data_y, is_eval = False):
         final_data = []
         data_x = raw_data_x.transpose(0, 2, 3, 1) # B N F T
-        kk = 0
         print(len(data_x)*len(data_x[0]))
         for i in range(len(data_x)):
             cur_time_state = data_x[i]
             for j in range(len(cur_time_state)):
                 flows = cur_time_state[j]
-                final_data.append(self.gen_final_data(i, j, flows, raw_data_x[i], raw_data_y[i]))
+                final_data.append(self.gen_final_data(i, j, flows, raw_data_x[i], raw_data_y[i], is_eval))
         return final_data  
     
     def _generate_train_val_test(self):
@@ -164,7 +169,7 @@ the provided time and regional information, and then generate the predictive tok
         x_test, y_test = x[-num_test:], y[-num_test:]
         
         train_data = self.process(x_train, y_train)
-        test_data = self.process(x_test, y_test)
+        test_data = self.process(x_test, y_test, True)
         train_data_dict = {
             'input_ids': [d['input_ids'] for d in train_data],
             'labels': [d['labels'] for d in train_data],
@@ -179,6 +184,13 @@ the provided time and regional information, and then generate the predictive tok
             'st_data_y': [d['st_data_y'] for d in test_data],
             'region_id': [d['region_id'] for d in test_data],
         }
+        # max1, max2 = -1, -1
+        # for d in train_data:
+        #     max1 = max(max1, d['input_ids'].max()) 
+        # for d in test_data:
+        #     max2 = max(max2, d['input_ids'].max()) 
+        # print(max2, max1)
+        # assert(False)
         if self.rank == 0 and self.cache_dataset:
             ensure_dir(self.cache_file_folder)
             # np.savez_compressed(self.train_cache_file_name, **train_data_dict)
@@ -239,7 +251,8 @@ the provided time and regional information, and then generate the predictive tok
                 input_ids,
                 batch_first=True,
                 padding_value=self.tokenizer.pad_token_id)
-            labels = torch.nn.utils.rnn.pad_sequence(labels,
+            if labels[0] is not None:
+                labels = torch.nn.utils.rnn.pad_sequence(labels,
                                                     batch_first=True,
                                                     padding_value=IGNORE_INDEX)
             batch = dict(
@@ -259,7 +272,7 @@ the provided time and regional information, and then generate the predictive tok
         train_dataloader = DataLoader(dataset=train_dataset, batch_size=batch_size,
                                     num_workers=num_workers, collate_fn=collator,
                                     shuffle=shuffle and train_sampler is None, sampler=train_sampler)
-        test_dataloader = DataLoader(dataset=test_dataset, batch_size=batch_size,
+        test_dataloader = DataLoader(dataset=test_dataset, batch_size=1,
                                     num_workers=num_workers, collate_fn=collator,
                                     shuffle=False)
         return train_dataloader, test_dataloader

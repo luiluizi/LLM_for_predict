@@ -42,12 +42,13 @@ def run_model(task=None, model_name=None, dataset_name=None, config_file=None,
         exp_id, model_name, dataset_name)
     model = get_model(config, data_feature)
     executor = get_executor(config, model)
-    if train or not os.path.exists(model_cache_file):
+    # if train or not os.path.exists(model_cache_file):
+    if train:
         executor.train(train_data, valid_data)
         if saved_model:
             executor.save_model(model_cache_file)
-    else:
-        executor.load_model(model_cache_file)
+    # else:
+        # executor.load_model(model_cache_file)
     executor.evaluate(test_data)
 
 

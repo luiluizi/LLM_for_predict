@@ -16,6 +16,7 @@ class MyModelExecutor(TrafficStateExecutor):
         TrafficStateExecutor.__init__(self, config, model)
         
     def evaluate(self, test_dataloader):
+        self.load_model_with_epoch(0)
         self._logger.info('Start evaluating ...')
         with torch.no_grad():
             self.model.eval()
@@ -29,6 +30,8 @@ class MyModelExecutor(TrafficStateExecutor):
                         for i in range(len(v)):
                             batch[k][i] = v[i].to(self.device)
                 y_true, y_pred = self.model(batch) if self.distributed else self.model.predict(batch)
+                y_true = y_true.transpose(1, 2)
+                y_pred = y_pred.transpose(1, 2)
                 y_truths.append(y_true.float().cpu().numpy())
                 y_preds.append(y_pred.float().cpu().numpy())
             y_preds = np.concatenate(y_preds, axis=0)
