@@ -16,7 +16,6 @@ class MyModelExecutor(TrafficStateExecutor):
         TrafficStateExecutor.__init__(self, config, model)
         
     def evaluate(self, test_dataloader):
-        self.load_model_with_epoch(0)
         self._logger.info('Start evaluating ...')
         with torch.no_grad():
             self.model.eval()
