@@ -2,6 +2,7 @@ import time
 import numpy as np
 import torch
 import os
+import scipy.sparse as sp
 from ray import tune
 from libcity.model import loss
 from functools import partial
@@ -11,9 +12,14 @@ from libcity.executor.traffic_state_executor import TrafficStateExecutor
 
 class MyModelExecutor(TrafficStateExecutor):
     def __init__(self, config, model):
-        self.lr_warmup_epoch = config.get("lr_warmup_epoch", 5)
+        self.lr_warmup_steps = config.get("lr_warmup_steps", 5)
         self.lr_warmup_init = config.get("lr_warmup_init", 2e-3)
+        self.lr_t_initial = config.get("lr_t_initial", 1e4)
+        self.lape_dim = config.get('lape_dim', 8)
+        self.adj_mx = model.get_data_feature().get('adj_mx')
         TrafficStateExecutor.__init__(self, config, model)
+        self.lap_mx = self._cal_lape(self.adj_mx).to(self.device)
+        self.random_flip = config.get('random_flip', True)
         
     def evaluate(self, test_dataloader):
         self._logger.info('Start evaluating ...')
@@ -28,7 +34,8 @@ class MyModelExecutor(TrafficStateExecutor):
                     elif type(v) is list and torch.is_tensor(v[0]):
                         for i in range(len(v)):
                             batch[k][i] = v[i].to(self.device)
-                y_true, y_pred = self.model(batch) if self.distributed else self.model.predict(batch)
+                spatial_enc = self.lap_mx.to(self.device)
+                y_true, y_pred = self.model(batch, spatial_enc) if self.distributed else self.model.predict1(batch)
                 y_true = y_true.transpose(1, 2)
                 y_pred = y_pred.transpose(1, 2)
                 y_truths.append(y_true.float().cpu().numpy())
@@ -128,7 +135,13 @@ class MyModelExecutor(TrafficStateExecutor):
                 elif type(v) is list and torch.is_tensor(v[0]):
                     for i in range(len(v)):
                         batch[k][i] = v[i].to(self.device)
-            loss = loss_func(batch)
+            spatial_enc = self.lap_mx.to(self.device)
+            if self.random_flip:
+                sign_flip = torch.rand(spatial_enc.size(1)).to(self.device)
+                sign_flip[sign_flip >= 0.5] = 1.0
+                sign_flip[sign_flip < 0.5] = -1.0
+                spatial_enc = spatial_enc * sign_flip.unsqueeze(0)
+            loss = loss_func(batch, spatial_enc)
             self._logger.debug(loss.item())
             losses.append(loss.item())
             batches_seen += 1
@@ -142,6 +155,14 @@ class MyModelExecutor(TrafficStateExecutor):
                     if self.lr_scheduler_type.lower() == 'cosinelr':
                         self.lr_scheduler.step_update(num_updates=batches_seen)
                 self.optimizer.zero_grad()
+            if batches_seen % 100 == 0:
+                train_loss = np.mean(losses)
+                log_lr = self.optimizer.param_groups[0]['lr']
+                self._logger.info("train_loss:"+str(train_loss)+" lr:"+str(log_lr))
+            if batches_seen % 15000 == 0:
+                  self.save_model_with_step(batches_seen)
+            assert(self.optimizer.param_groups[0]['lr'] > 0.0)
+                
         return losses, batches_seen
 
     def _valid_epoch(self, eval_dataloader, epoch_idx, batches_seen=None, loss_func=None):
@@ -164,6 +185,27 @@ class MyModelExecutor(TrafficStateExecutor):
                 mean_loss = reduce_array(mean_loss, self.world_size, self.device)
             self._writer.add_scalar('eval loss', mean_loss, batches_seen)
             return mean_loss
+        
+    def _cal_lape(self, adj_mx):
+        L, isolated_point_num = self._calculate_normalized_laplacian(adj_mx)
+        EigVal, EigVec = np.linalg.eig(L.toarray())
+        idx = EigVal.argsort()
+        EigVal, EigVec = EigVal[idx], np.real(EigVec[:, idx])
+
+        laplacian_pe = torch.from_numpy(EigVec[:, isolated_point_num + 1: self.lape_dim + isolated_point_num + 1]).float()
+        laplacian_pe.require_grad = False
+        return laplacian_pe   
+    
+    def _calculate_normalized_laplacian(self, adj):
+        adj = sp.coo_matrix(adj)
+        d = np.array(adj.sum(1))
+        isolated_point_num = np.sum(np.where(d, 0, 1))
+        self._logger.info(f"Number of isolated points: {isolated_point_num}")
+        d_inv_sqrt = np.power(d, -0.5).flatten()
+        d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.
+        d_mat_inv_sqrt = sp.diags(d_inv_sqrt)
+        normalized_laplacian = sp.eye(adj.shape[0]) - adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt).tocoo()
+        return normalized_laplacian, isolated_point_num
     
     def _build_optimizer(self):
         self._logger.info('You select `{}` optimizer.'.format(self.learner.lower()))
@@ -216,8 +258,8 @@ class MyModelExecutor(TrafficStateExecutor):
                     factor=self.lr_decay_ratio, threshold=self.lr_threshold)
             elif self.lr_scheduler_type.lower() == 'cosinelr':
                 lr_scheduler = CosineLRScheduler(
-                    self.optimizer, t_initial=self.epochs, lr_min=self.lr_eta_min, decay_rate=self.lr_decay_ratio,
-                    warmup_t=self.lr_warmup_epoch, warmup_lr_init=self.lr_warmup_init)
+                    self.optimizer, t_initial=self.lr_t_initial, lr_min=self.lr_eta_min, decay_rate=self.lr_decay_ratio,
+                    warmup_t=self.lr_warmup_steps, warmup_lr_init=self.lr_warmup_init)
             else:
                 self._logger.warning('Received unrecognized lr_scheduler, '
                                      'please check the parameter `lr_scheduler`.')

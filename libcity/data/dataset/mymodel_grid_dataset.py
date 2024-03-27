@@ -147,13 +147,9 @@ the provided time and regional information, and then generate the predictive tok
         return final_data  
     
     def _generate_train_val_test(self):
-        script_dir = os.path.dirname(__file__)
-        file_path = os.path.join(script_dir, 'chosen_data_id_40.json')
-        with open(file_path, 'r') as f:
-            id_list = np.array(json.load(f)[self.dataset][0])
         x, y = self._generate_data()
-        x = x[:, :, id_list, :]
-        y = y[:, :, id_list, :]
+        x = x[:, :, self.region_id_list, :]
+        y = y[:, :, self.region_id_list, :]
         self.feature_dim = x.shape[-1]
         return self._split_train_val_test(x, y)
     
@@ -169,7 +165,7 @@ the provided time and regional information, and then generate the predictive tok
         x_test, y_test = x[-num_test:], y[-num_test:]
         
         train_data = self.process(x_train, y_train)
-        test_data = self.process(x_test, y_test, True)
+        test_data = self.process(x_test, y_test)
         train_data_dict = {
             'input_ids': [d['input_ids'] for d in train_data],
             'labels': [d['labels'] for d in train_data],
@@ -184,17 +180,9 @@ the provided time and regional information, and then generate the predictive tok
             'st_data_y': [d['st_data_y'] for d in test_data],
             'region_id': [d['region_id'] for d in test_data],
         }
-        # max1, max2 = -1, -1
-        # for d in train_data:
-        #     max1 = max(max1, d['input_ids'].max()) 
-        # for d in test_data:
-        #     max2 = max(max2, d['input_ids'].max()) 
-        # print(max2, max1)
-        # assert(False)
+        
         if self.rank == 0 and self.cache_dataset:
             ensure_dir(self.cache_file_folder)
-            # np.savez_compressed(self.train_cache_file_name, **train_data_dict)
-            # np.savez_compressed(self.test_cache_file_name, **test_data_dict)
             with open(self.train_cache_file_name, 'wb') as f:
                 pickle.dump(train_data_dict, f)
 
@@ -205,8 +193,6 @@ the provided time and regional information, and then generate the predictive tok
     
     def _load_cache_train_val_test(self):
         self._logger.info('Loading ' + self.cache_file_name)
-        # train_cat_data = np.load(self.train_cache_file_name)
-        # test_cat_data = np.load(self.test_cache_file_name)
         with open(self.train_cache_file_name, 'rb') as f:
             train_cat_data = pickle.load(f)
         with open(self.test_cache_file_name, 'rb') as f:
@@ -222,18 +208,16 @@ the provided time and regional information, and then generate the predictive tok
     def get_data(self):
         train_data, test_data = [], []
         self._load_grid_3d(self.data_files[0]) #get time information
+        script_dir = os.path.dirname(__file__)
+        file_path = os.path.join(script_dir, 'chosen_data_id_40.json')
+        with open(file_path, 'r') as f:
+            self.region_id_list = np.array(json.load(f)[self.dataset][0])
         if self.data is None:
             self.data = {}
             if self.cache_dataset and os.path.exists(self.train_cache_file_name) and os.path.exists(self.test_cache_file_name):
                 train_data, test_data = self._load_cache_train_val_test()
             else:
                 train_data, test_data = self._generate_train_val_test()
-        # train_data = self.process(x_train, y_train)
-        # test_data = self.process(x_test, y_test)
-        
-        # train_data = None
-        # eval_data = train_data
-        # test_data = train_data
         self.train_dataloader, self.test_dataloader = \
             self.generate_dataloader(train_data, test_data, self.batch_size, self.num_workers)
         self.num_batches = len(self.train_dataloader)
@@ -278,7 +262,9 @@ the provided time and regional information, and then generate the predictive tok
         return train_dataloader, test_dataloader
     
     def get_data_feature(self):
-        return {"scaler": self.scaler, "tokenizer": self.tokenizer,
+        return {"scaler": self.scaler, "adj_mx": self.adj_mx ,"tokenizer": self.tokenizer,
                 "st_start_token":self.tokenizer.convert_tokens_to_ids(DEFAULT_ST_START_TOKEN),
+                "st_end_token":self.tokenizer.convert_tokens_to_ids(DEFAULT_ST_END_TOKEN),
                 "ext_dim": self.ext_dim, "num_nodes": self.num_nodes, "feature_dim": self.feature_dim,
-                "output_dim": self.output_dim, "num_batches": self.num_batches,}
+                "output_dim": self.output_dim, "num_batches": self.num_batches,
+                "region_id_list": self.region_id_list}

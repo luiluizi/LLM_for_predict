@@ -21,6 +21,14 @@ class DilatedInception(nn.Module):
         x = torch.cat(x, dim=1)
         return x
 
+class LaplacianPE(nn.Module):
+    def __init__(self, lape_dim, embed_dim):
+        super(LaplacianPE, self).__init__()
+        self.embedding_pos_enc = nn.Linear(lape_dim, embed_dim)
+    
+    def forward(self, lap_mx):
+        lap_pos_enc = self.embedding_pos_enc(lap_mx).unsqueeze(0).unsqueeze(0)
+        return lap_pos_enc
 
 class MyEncoder(nn.Module):
     def __init__(self, config, data_feature):
@@ -28,6 +36,7 @@ class MyEncoder(nn.Module):
         self.num_nodes = data_feature.get('num_nodes', 1)
         self.feature_dim = data_feature.get('feature_dim', 2)
         self.output_dim = data_feature.get('output_dim', 2)
+        self.region_id_list = data_feature.get('region_id_list')
 
         self.input_window = config.get('input_window', 1)
         self.output_window = config.get('output_window', 1)
@@ -40,6 +49,9 @@ class MyEncoder(nn.Module):
         self.skip_channels = config.get('enc_skip_channels', 64)
         self.end_channels = config.get('enc_end_channels', 128)
         self.layers = config.get('enc_layers', 3)
+        
+        self.lape_dim = config.get('lape_dim', 8)
+        self.st_hidden_size = config.get('st_hidden_size', 64)
 
         self.filter_convs = nn.ModuleList()
         self.gate_convs = nn.ModuleList()
@@ -48,6 +60,7 @@ class MyEncoder(nn.Module):
         self.start_conv = nn.Conv2d(in_channels=self.feature_dim,
                                     out_channels=self.residual_channels,
                                     kernel_size=(1, 1))
+        self.spatial_embedding = LaplacianPE(self.lape_dim, self.st_hidden_size)
 
         kernel_size = 7
         if self.dilation_exponential > 1:
@@ -102,7 +115,7 @@ class MyEncoder(nn.Module):
             self.skipE = nn.Conv2d(in_channels=self.residual_channels,
                                    out_channels=self.skip_channels, kernel_size=(1, 1), bias=True)
 
-    def forward(self, source):
+    def forward(self, source, lap_mx):
         inputs = source
         inputs = inputs.transpose(1, 3)  # (batch_size, feature_dim, num_nodes, input_window)
         if self.input_window < self.receptive_field:
@@ -126,4 +139,7 @@ class MyEncoder(nn.Module):
 
         skip = self.skipE(x) + skip
         x = F.relu(skip)
+        spatial_enc = self.spatial_embedding(lap_mx).transpose(1,3)
+        spatial_enc = spatial_enc[:, :, self.region_id_list, :]
+        x += spatial_enc
         return x

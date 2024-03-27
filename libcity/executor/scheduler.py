@@ -99,7 +99,7 @@ class CosineLRScheduler(Scheduler):
                  warmup_lr_init=0,
                  warmup_prefix=False,
                  cycle_limit=0,
-                 t_in_epochs=True,
+                 t_in_epochs=False,
                  noise_range_t=None,
                  noise_pct=0.67,
                  noise_std=1.0,
