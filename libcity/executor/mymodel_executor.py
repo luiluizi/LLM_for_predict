@@ -19,7 +19,8 @@ class MyModelExecutor(TrafficStateExecutor):
         self.adj_mx = model.get_data_feature().get('adj_mx')
         TrafficStateExecutor.__init__(self, config, model)
         self.lap_mx = self._cal_lape(self.adj_mx).to(self.device)
-        self.random_flip = config.get('random_flip', True)
+        # self.random_flip = config.get('random_flip', True)
+        self.random_flip = False
         
     def evaluate(self, test_dataloader):
         self._logger.info('Start evaluating ...')
@@ -35,7 +36,7 @@ class MyModelExecutor(TrafficStateExecutor):
                         for i in range(len(v)):
                             batch[k][i] = v[i].to(self.device)
                 spatial_enc = self.lap_mx.to(self.device)
-                y_true, y_pred = self.model(batch, spatial_enc) if self.distributed else self.model.predict1(batch)
+                y_true, y_pred = self.model(batch, spatial_enc) if self.distributed else self.model.predict1(batch, spatial_enc)
                 y_true = y_true.transpose(1, 2)
                 y_pred = y_pred.transpose(1, 2)
                 y_truths.append(y_true.float().cpu().numpy())

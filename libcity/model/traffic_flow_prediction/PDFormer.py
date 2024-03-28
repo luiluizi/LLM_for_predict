@@ -86,9 +86,17 @@ class DataEmbedding(nn.Module):
             self.weekday_embedding = nn.Embedding(weekday_size, embed_dim)
         self.spatial_embedding = LaplacianPE(lape_dim, embed_dim)
         self.dropout = nn.Dropout(drop)
+        
+    def check_scale(self, embedding):
+        print(f"Max: {embedding.max().item()}")
+        print(f"Min: {embedding.min().item()}")
+        print(f"Mean: {embedding.mean().item()}")
+        print(f"Std: {embedding.std().item()}")
 
     def forward(self, x, lap_mx):
         origin_x = x
+        print('x scale')
+        self.check_scale(x)
         x = self.value_embedding(origin_x[:, :, :, :self.feature_dim])
         x += self.position_encoding(x)
         if self.add_time_in_day:
@@ -96,6 +104,8 @@ class DataEmbedding(nn.Module):
         if self.add_day_in_week:
             x += self.weekday_embedding(origin_x[:, :, :, self.feature_dim + 1: self.feature_dim + 8].argmax(dim=3))
         x += self.spatial_embedding(lap_mx)
+        print('spatial scale')
+        self.check_scale(self.spatial_embedding(lap_mx))
         x = self.dropout(x)
         return x
 
@@ -198,6 +208,7 @@ class STSelfAttention(nn.Module):
         geo_attn = geo_attn.softmax(dim=-1)
         geo_attn = self.geo_attn_drop(geo_attn)
         geo_x = (geo_attn @ geo_v).transpose(2, 3).reshape(B, T, N, int(D * self.geo_ratio))
+        print('geo_attn, x, q, k, v shape', geo_attn.shape, geo_x.shape, geo_q.shape, geo_k.shape, geo_v.shape)
 
         sem_q = self.sem_q_conv(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
         sem_k = self.sem_k_conv(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
@@ -211,6 +222,7 @@ class STSelfAttention(nn.Module):
         sem_attn = sem_attn.softmax(dim=-1)
         sem_attn = self.sem_attn_drop(sem_attn)
         sem_x = (sem_attn @ sem_v).transpose(2, 3).reshape(B, T, N, int(D * self.sem_ratio))
+        print('sem_attn, x, q, k, v shape', sem_attn.shape, sem_x.shape, sem_q.shape, sem_k.shape, sem_v.shape)
 
         x = self.proj(torch.cat([t_x, geo_x, sem_x], dim=-1))
         x = self.proj_drop(x)
@@ -435,11 +447,11 @@ class PDFormer(AbstractTrafficStateModel):
         print("-"*10+"shape of x:"+str(x.shape))
         enc = self.enc_embed_layer(x, lap_mx)
         print("-"*10+"shape of embedding:"+str(enc.shape))
-        assert(False)
-        
         skip = 0
         for i, encoder_block in enumerate(self.encoder_blocks):
             enc = encoder_block(enc, x_patterns, pattern_keys, self.geo_mask, self.sem_mask)
+            print('enc shape', enc.shape)
+            assert(False)
             skip += self.skip_convs[i](enc.permute(0, 3, 2, 1))
 
         skip = self.end_conv1(F.relu(skip.permute(0, 3, 2, 1)))

@@ -48,7 +48,8 @@ def run_model(task=None, model_name=None, dataset_name=None, config_file=None,
         if saved_model:
             executor.save_model(model_cache_file)
     else:
-        executor.load_model_with_step(60000)
+        # executor.load_model_with_step(15000)
+        executor.load_model_with_epoch(2)
         # executor.load_model(model_cache_file)
     executor.evaluate(test_data)
 

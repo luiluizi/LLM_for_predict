@@ -71,7 +71,6 @@ class MyModel(AbstractTrafficStateModel):
         self.st_pred_linear_1.to(torch.bfloat16)
         self.st_pred_linear_2.to(torch.bfloat16)
         self.st_pred_linear_3.to(torch.bfloat16)
-        # self.lm_head.to(torch.bfloat16)
         self.llama_model.lm_head.to(torch.bfloat16)
     
     def get_data_feature(self):
@@ -86,7 +85,8 @@ class MyModel(AbstractTrafficStateModel):
                 cur_name = name.replace('predictor.', '')
                 cur_state_dict[cur_name].copy_(weight)
         self.st_tower.requires_grad_(False)
-        self.st_tower.spatial_embedding.requires_grad_(True)
+        # self.st_tower.spatial_embedding.requires_grad_(True)
+        # self.st_tower.start_conv.requires_grad_(True)
     
     def initialize_llm_model(self):
         path = '/home/panda/private/jjw/hck/br/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T'
